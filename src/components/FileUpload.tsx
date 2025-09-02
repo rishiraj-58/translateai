@@ -25,8 +25,8 @@ export function FileUpload({ onFileUpload, onTestExtraction }: FileUploadProps) 
       return false;
     }
 
-    if (file.size > 50 * 1024 * 1024) { // 50MB limit
-      setError('File size must be less than 50MB');
+    if (file.size > 200 * 1024 * 1024) { // 200MB limit
+      setError('File size must be less than 200MB');
       return false;
     }
 
@@ -161,7 +161,7 @@ export function FileUpload({ onFileUpload, onTestExtraction }: FileUploadProps) 
                 Word (.docx)
               </span>
               <span className="inline-flex items-center px-2 py-1 bg-purple-100 text-purple-800 text-xs font-medium rounded-full">
-                Max 50MB
+                Max 200MB
               </span>
             </div>
           </div>

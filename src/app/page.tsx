@@ -84,16 +84,16 @@ export default function Home() {
 
     setIsTranslating(true);
     setTranslationProgress(0);
-    setCurrentStep('Sending document to AI for processing...');
+    setCurrentStep('Preparing document for AI processing...');
     setError(null);
 
     try {
-      // Step 1: Send document directly to Gemini AI for extraction and translation
-      setTranslationProgress(25);
-      setCurrentStep('AI is analyzing your document...');
-
       const formData = new FormData();
       formData.append('file', uploadedFile);
+
+      // Step 1: Send document to Gemini AI for processing
+      setTranslationProgress(10);
+      setCurrentStep('Sending to Gemini AI...');
 
       const response = await fetch('/api/ai-translate', {
         method: 'POST',
@@ -111,29 +111,47 @@ export default function Home() {
         throw new Error('AI could not extract or translate text from the document');
       }
 
-      setTranslationProgress(90);
-      setCurrentStep('Processing AI response...');
+      // Update progress and show processing method
+      setTranslationProgress(50);
+      if (result.processingMethod === 'streaming-chunked-ai') {
+        setCurrentStep(`🚀 Processing large document: ${result.processedPages}/${result.totalPages} pages completed (${result.successfulChunks}/${result.chunksProcessed} chunks successful)`);
+      } else {
+        setCurrentStep('🤖 AI is analyzing and translating your document...');
+      }
 
       // Step 2: Prepare document for download
+      setTranslationProgress(80);
+      setCurrentStep('Preparing download file...');
+
       const documentReconstruction = await import('@/utils/documentReconstruction');
       const { createDocumentReconstructor } = documentReconstruction;
 
       const translationResults = [{
-        originalText: 'Document processed by AI',
+        originalText: result.processingMethod === 'chunked-ai'
+          ? `Large document processed in ${result.chunksProcessed} chunks`
+          : 'Document processed by AI',
         translatedText: result.translatedContent,
-        sourceLanguage: result.sourceLanguage || 'auto',
+        sourceLanguage: 'auto', // AI detects language automatically
         targetLanguage: 'en',
         confidence: 0.95
       }];
 
       const reconstructor = createDocumentReconstructor(translationResults, {
         title: uploadedFile.name.replace(/\.[^/.]+$/, '') + ' (AI Translated)',
-        subject: 'AI-Translated Document',
-        creator: 'TranslateAI with Gemini'
+        subject: result.processingMethod === 'chunked-ai'
+          ? `AI-Translated Large Document (${result.totalPages} pages)`
+          : 'AI-Translated Document',
+        creator: 'TranslateAI with Gemini AI'
       });
 
       setTranslationProgress(100);
-      setCurrentStep('Translation completed successfully!');
+
+      // Show completion message based on processing method
+      if (result.processingMethod === 'streaming-chunked-ai') {
+        setCurrentStep(`🎉 Large book translation completed! ${result.wordCount} words translated from ${result.totalPages} pages in ${result.chunksProcessed} chunks with ${result.successfulChunks} successful translations.`);
+      } else {
+        setCurrentStep(`✅ Translation completed successfully! ${result.wordCount} words translated.`);
+      }
 
       setTranslatedContent(result.translatedContent);
       setTranslationResults(translationResults);
@@ -176,7 +194,8 @@ export default function Home() {
           </h2>
           <p className="text-lg text-gray-600 max-w-2xl mx-auto mb-6">
             Upload your PDF, Word, or image document and let Gemini AI extract and translate it to English.
-            Supports Malayalam, Hindi, Arabic, and 100+ other languages with advanced OCR capabilities.
+            Supports complete books up to 200MB, Malayalam, Hindi, Arabic, and 100+ other languages with advanced OCR.
+            Large documents are automatically processed in chunks - no manual splitting required!
           </p>
           <div className="flex flex-wrap justify-center gap-4 text-sm">
             <div className="flex items-center space-x-2 bg-white/80 backdrop-blur-sm px-3 py-2 rounded-full shadow-sm">
@@ -185,11 +204,11 @@ export default function Home() {
             </div>
             <div className="flex items-center space-x-2 bg-white/80 backdrop-blur-sm px-3 py-2 rounded-full shadow-sm">
               <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-              <span className="text-gray-700">OCR & Complex Scripts</span>
+              <span className="text-gray-700">Auto-Chunking</span>
             </div>
             <div className="flex items-center space-x-2 bg-white/80 backdrop-blur-sm px-3 py-2 rounded-full shadow-sm">
               <div className="w-2 h-2 bg-purple-500 rounded-full animate-pulse"></div>
-              <span className="text-gray-700">100+ Languages</span>
+              <span className="text-gray-700">200MB Books</span>
             </div>
           </div>
         </div>
