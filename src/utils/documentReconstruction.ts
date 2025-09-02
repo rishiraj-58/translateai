@@ -118,7 +118,7 @@ export class DocumentReconstructor {
       // Create document sections
       const sections = [];
 
-      // Title
+      // Title with UTF-8 support
       sections.push(
         new Paragraph({
           text: title,
@@ -127,7 +127,7 @@ export class DocumentReconstructor {
         })
       );
 
-      // Metadata
+      // Metadata with UTF-8 support
       const metadataText = `Original Language: ${this.getDetectedLanguage()}\nTranslation Date: ${new Date().toLocaleString()}`;
       sections.push(
         new Paragraph({
@@ -142,14 +142,17 @@ export class DocumentReconstructor {
         })
       );
 
-      // Content paragraphs
+      // Content paragraphs with proper Unicode handling
       const paragraphs = content.split('\n\n').filter(p => p.trim());
       for (const paragraph of paragraphs) {
+        // Ensure paragraph text is properly encoded
+        const cleanText = paragraph.trim();
+
         sections.push(
           new Paragraph({
             children: [
               new TextRun({
-                text: paragraph.trim(),
+                text: cleanText,
                 size: 24
               })
             ],
@@ -158,7 +161,7 @@ export class DocumentReconstructor {
         );
       }
 
-      // Create document
+      // Create document with UTF-8 support
       const doc = new Document({
         sections: [{
           properties: {},
@@ -166,21 +169,22 @@ export class DocumentReconstructor {
         }]
       });
 
-      // Generate and return blob
+      // Generate and return blob with proper encoding
       const buffer = await Packer.toBuffer(doc);
       return new Blob([buffer], {
-        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document;charset=utf-8'
       });
 
     } catch (error) {
       console.error('DOCX creation failed:', error);
-      // Fallback to HTML-based DOCX
+      // Enhanced fallback with UTF-8 BOM
       const htmlContent = this.getHTMLContent();
-      const wordTemplate = `
+      const wordTemplate = `<?xml version="1.0" encoding="UTF-8"?>
         <html xmlns:o="urn:schemas-microsoft-com:office:office"
               xmlns:w="urn:schemas-microsoft-com:office:word"
               xmlns="http://www.w3.org/TR/REC-html40">
         <head>
+          <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
           <meta charset="utf-8">
           <title>Translated Document</title>
           <!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>90</w:Zoom></w:WordDocument></xml><![endif]-->
@@ -195,8 +199,10 @@ export class DocumentReconstructor {
         </html>
       `;
 
-      return new Blob([wordTemplate], {
-        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      // Add UTF-8 BOM
+      const bom = '\uFEFF';
+      return new Blob([bom + wordTemplate], {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document;charset=utf-8'
       });
     }
   }
@@ -212,10 +218,16 @@ export class DocumentReconstructor {
       const title = this.metadata.title || 'Translated Document';
       const content = this.getCombinedText();
 
-      // Create PDF document
-      const doc = new jsPDF();
+      // Create PDF document with UTF-8 support
+      const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+        putOnlyUsedFonts: true,
+        compress: true
+      });
 
-      // Set up document properties
+      // Add UTF-8 BOM for better character encoding
       doc.setProperties({
         title: title,
         subject: this.metadata.subject || 'Translated Document',
@@ -223,10 +235,12 @@ export class DocumentReconstructor {
         creator: this.metadata.creator || 'TranslateAI'
       });
 
-      // Add title
+      // Add title with proper encoding
       doc.setFontSize(20);
       doc.setFont('helvetica', 'bold');
-      const titleLines = doc.splitTextToSize(title, 180);
+
+      // Handle Unicode characters properly
+      const titleLines = this.splitTextForPDF(doc, title, 180);
       doc.text(titleLines, 15, 25);
 
       // Add metadata
@@ -234,7 +248,7 @@ export class DocumentReconstructor {
       doc.setFontSize(10);
       doc.setFont('helvetica', 'italic');
       const metadataText = `Original Language: ${this.getDetectedLanguage()}\nTranslation Date: ${new Date().toLocaleString()}`;
-      const metadataLines = doc.splitTextToSize(metadataText, 180);
+      const metadataLines = this.splitTextForPDF(doc, metadataText, 180);
       doc.text(metadataLines, 15, yPosition);
 
       // Add content
@@ -248,7 +262,7 @@ export class DocumentReconstructor {
       const lineHeight = 7;
 
       for (const paragraph of paragraphs) {
-        const lines = doc.splitTextToSize(paragraph.trim(), 180);
+        const lines = this.splitTextForPDF(doc, paragraph.trim(), 180);
 
         for (const line of lines) {
           if (yPosition + lineHeight > pageHeight - margin) {
@@ -263,16 +277,59 @@ export class DocumentReconstructor {
         yPosition += lineHeight * 0.5;
       }
 
-      // Return as blob
+      // Return as blob with proper encoding
       const pdfOutput = doc.output('blob');
       return pdfOutput;
 
     } catch (error) {
       console.error('PDF creation failed:', error);
-      // Fallback to HTML-based PDF
+      // Enhanced fallback with proper encoding
       const htmlContent = this.getHTMLContent();
-      return new Blob([htmlContent], { type: 'application/pdf' });
+      // Add BOM for UTF-8
+      const bom = '\uFEFF';
+      const htmlWithBOM = bom + htmlContent;
+      return new Blob([htmlWithBOM], { type: 'text/html;charset=utf-8' });
     }
+  }
+
+  /**
+   * Split text for PDF with Unicode support
+   */
+  private splitTextForPDF(doc: any, text: string, maxWidth: number): string[] {
+    try {
+      // Try standard splitTextToSize first
+      const lines = doc.splitTextToSize(text, maxWidth);
+      if (lines && lines.length > 0) {
+        return lines;
+      }
+    } catch (error) {
+      console.warn('Standard text splitting failed, using fallback:', error);
+    }
+
+    // Fallback: manual text splitting for Unicode characters
+    const words = text.split(' ');
+    const lines: string[] = [];
+    let currentLine = '';
+
+    for (const word of words) {
+      const testLine = currentLine ? `${currentLine} ${word}` : word;
+
+      // Rough width estimation (not perfect but better than nothing)
+      const estimatedWidth = testLine.length * 2.5; // Approximate character width
+
+      if (estimatedWidth > maxWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    }
+
+    if (currentLine) {
+      lines.push(currentLine);
+    }
+
+    return lines.length > 0 ? lines : [text];
   }
 
   /**

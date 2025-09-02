@@ -7,6 +7,23 @@ export interface ExtractedText {
   language?: string;
 }
 
+export interface TextSegment {
+  id: string;
+  sourceText: string;
+  translatedText?: string;
+  segmentNumber: number;
+  wordCount: number;
+  language?: string;
+}
+
+export interface SegmentedDocument {
+  segments: TextSegment[];
+  totalWordCount: number;
+  totalSegments: number;
+  language?: string;
+  originalFileName?: string;
+}
+
 export interface TextChunk {
   content: string;
   pageNumber?: number;
@@ -541,6 +558,46 @@ function detectLanguage(text: string): string {
 
   // Default to English for Latin script
   return 'en';
+}
+
+/**
+ * Segment extracted text into logical paragraphs for translation
+ */
+export function segmentTextForTranslation(
+  extractedText: ExtractedText,
+  originalFileName?: string
+): SegmentedDocument {
+  // Split text into paragraphs by double newlines
+  const paragraphs = extractedText.content
+    .split(/\n\s*\n/)
+    .map(p => p.trim())
+    .filter(p => p.length > 0 && !/^\s*$/.test(p));
+
+  // Create segments from paragraphs
+  const segments: TextSegment[] = paragraphs.map((paragraph, index) => {
+    const wordCount = paragraph.split(/\s+/).filter(word => word.length > 0).length;
+
+    return {
+      id: `seg-${index + 1}`,
+      sourceText: paragraph,
+      segmentNumber: index + 1,
+      wordCount,
+      language: extractedText.language
+    };
+  });
+
+  // Filter out very short segments (likely noise)
+  const meaningfulSegments = segments.filter(segment => segment.wordCount >= 3);
+
+  const totalWordCount = meaningfulSegments.reduce((sum, seg) => sum + seg.wordCount, 0);
+
+  return {
+    segments: meaningfulSegments,
+    totalWordCount,
+    totalSegments: meaningfulSegments.length,
+    language: extractedText.language,
+    originalFileName
+  };
 }
 
 /**

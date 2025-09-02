@@ -9,12 +9,19 @@ interface DownloadSectionProps {
   translatedContent: string;
   translationResults?: TranslationResult[];
   originalFileName?: string;
+  translatedSegments?: any[];
+  highFidelityResult?: {
+    docxBuffer?: string;
+    highFidelity: boolean;
+  };
 }
 
 export function DownloadSection({
   translatedContent,
   translationResults = [],
-  originalFileName = 'document'
+  originalFileName = 'document',
+  translatedSegments = [],
+  highFidelityResult
 }: DownloadSectionProps) {
   const [isDownloading, setIsDownloading] = useState<string | null>(null);
 
@@ -24,6 +31,18 @@ export function DownloadSection({
     try {
       let blob: Blob;
       let filename: string;
+
+      // Handle high-fidelity DOCX download
+      if (format === 'docx' && highFidelityResult?.docxBuffer) {
+        blob = new Blob(
+          [Uint8Array.from(atob(highFidelityResult.docxBuffer), c => c.charCodeAt(0))],
+          { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }
+        );
+        filename = generateFilename(originalFileName, 'docx');
+        downloadBlob(blob, filename);
+        setIsDownloading(null);
+        return;
+      }
 
       if (translationResults.length > 0) {
         // Use document reconstructor for proper formatting
