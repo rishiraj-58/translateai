@@ -157,19 +157,32 @@ Your task is to:
 1. Read and analyze the document structure, identifying headings, paragraphs, lists, and content organization.
 2. Extract ALL text from the document, including complex scripts and fonts.
 3. Translate the extracted text into ${targetLanguageName}, preserving the original structure and formatting.
-4. Return the translated content in a structured format that maintains the document's hierarchy.
+4. Return the translated content in MARKDOWN format that maintains the document's hierarchy:
+   - Use # for main headings (H1), ## for subheadings (H2), ### for smaller headings (H3), etc.
+   - Use **bold** for emphasis and important text
+   - Use *italic* for secondary emphasis
+   - Use - or * for bullet lists
+   - Use 1. 2. 3. for numbered lists
+   - Use > for quotes or important passages
+   - Maintain paragraph breaks with double line breaks
 
-IMPORTANT: Return ONLY the translated ${targetLanguageName} text with proper structure. Do not include any commentary, explanations, or markdown formatting. Maintain paragraph breaks and document organization.`
+IMPORTANT: Return ONLY the translated ${targetLanguageName} text in markdown format. Do not include any commentary or explanations. Preserve all structural elements from the original document.`
 
-      : `You are an expert document translator. The attached PDF document contains Malayalam text from a book.
+      : `You are an expert document translator. The attached PDF document contains text from a book.
 
 Your task is to:
-1. Read the document and accurately extract all Malayalam text.
-2. Translate the extracted text into ${targetLanguageName}.
-3. Return ONLY the final, translated ${targetLanguageName} text. Maintain paragraph breaks.
+1. Read the document and accurately extract all text while identifying its structure (headings, paragraphs, lists, etc.).
+2. Translate the extracted text into ${targetLanguageName}, preserving the original structure.
+3. Return the translated text in MARKDOWN format:
+   - Use # for main headings, ## for subheadings, ### for smaller headings
+   - Use **bold** for important text or headings that should stand out
+   - Use *italic* for emphasis
+   - Use - for bullet points
+   - Use 1. 2. 3. for numbered lists
+   - Maintain paragraph breaks
 4. Do not include any commentary, apologies, or summaries.
 
-Focus on accuracy and maintaining the document's literary quality. Translate everything to ${targetLanguageName}.`;
+Focus on accuracy and maintaining the document's literary quality. Translate everything to ${targetLanguageName} with proper markdown formatting.`;
 
     let attempt = 0;
     let success = false;

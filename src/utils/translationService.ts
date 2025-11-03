@@ -176,7 +176,15 @@ export class TranslationService {
         apiKey: this.config.apiKey
       });
 
-      const prompt = `Translate the following text to English. Only return the translated text, nothing else. If the text is already in English, return it as-is:
+      const prompt = `Translate the following text to English. Preserve the document structure and formatting using markdown:
+- Use # for main headings, ## for subheadings, ### for smaller headings
+- Use **bold** for important text and emphasis
+- Use *italic* for secondary emphasis
+- Use - for bullet lists
+- Use 1. 2. 3. for numbered lists
+- Maintain paragraph breaks
+
+If the text is already in English, return it with proper markdown formatting as-is. Return ONLY the translated/formatted text, no commentary.
 
 ${text}`;
 

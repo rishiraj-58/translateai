@@ -4,8 +4,9 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { FileUpload } from '@/components/FileUpload';
 import { TranslationProgress } from '@/components/TranslationProgress';
 import { DownloadSection } from '@/components/DownloadSection';
+import { TranslationHistory } from '@/components/TranslationHistory';
 import { ErrorBoundary, useErrorHandler, safeAsync } from '@/components/ErrorBoundary';
-import { Languages, FileText, Download, AlertCircle, RefreshCw, ChevronDown, Globe } from 'lucide-react';
+import { Languages, FileText, Download, AlertCircle, RefreshCw, ChevronDown, Globe, Save, History } from 'lucide-react';
 
 export default function Home() {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -20,6 +21,9 @@ export default function Home() {
   const [showLanguageDropdown, setShowLanguageDropdown] = useState(false);
   const [useHighFidelity, setUseHighFidelity] = useState(false);
   const [highFidelityResult, setHighFidelityResult] = useState<{docxBuffer?: string; highFidelity: boolean} | undefined>();
+  const [showHistory, setShowHistory] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown when clicking outside
@@ -153,7 +157,55 @@ export default function Home() {
     setShowLanguageDropdown(false); // Close dropdown when file is uploaded
   }, [setShowLanguageDropdown]);
 
+  const handleSaveTranslation = useCallback(async () => {
+    if (!translatedContent || !uploadedFile) {
+      alert('No translation to save');
+      return;
+    }
 
+    setIsSaving(true);
+    setSaveSuccess(false);
+
+    try {
+      const response = await fetch('/api/translations/save', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          originalFileName: uploadedFile.name,
+          originalText: '', // We could store original text if needed
+          translatedText: translatedContent,
+          sourceLanguage: 'auto',
+          targetLanguage: selectedLanguage,
+          fileType: uploadedFile.type,
+          fileSize: uploadedFile.size,
+          pageCount: translatedSegments.length || 1,
+          highFidelity: useHighFidelity
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to save translation');
+      }
+
+      const data = await response.json();
+      console.log('Translation saved:', data);
+      
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000); // Hide success message after 3 seconds
+    } catch (error) {
+      console.error('Error saving translation:', error);
+      alert(
+        error instanceof Error && error.message.includes('Database')
+          ? 'Database connection failed. Please ensure PostgreSQL is running and configured.'
+          : 'Failed to save translation. Please try again.'
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  }, [translatedContent, uploadedFile, selectedLanguage, translatedSegments, useHighFidelity]);
 
   const handleStartTranslation = useCallback(async () => {
     if (!uploadedFile) return;
@@ -312,6 +364,11 @@ export default function Home() {
     }
   }, [uploadedFile, handleError]);
 
+  // Show history view if requested
+  if (showHistory) {
+    return <TranslationHistory onClose={() => setShowHistory(false)} />;
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       {/* Header - Always show for language selection */}
@@ -349,37 +406,48 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Language Selector */}
-              <div className="relative" ref={dropdownRef}>
+              {/* Language Selector and History Button */}
+              <div className="flex items-center gap-3">
                 <button
-                  onClick={() => setShowLanguageDropdown(!showLanguageDropdown)}
-                  className="flex items-center space-x-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                  onClick={() => setShowHistory(true)}
+                  className="flex items-center space-x-2 px-4 py-2 bg-purple-100 hover:bg-purple-200 rounded-lg transition-colors"
+                  title="View Translation History"
                 >
-                  <Globe className="h-5 w-5 text-gray-600" />
-                  <span className="text-sm font-medium text-gray-700">
-                    {supportedLanguages.find(lang => lang.code === selectedLanguage)?.name || 'English'}
-                  </span>
-                  <ChevronDown className={`h-4 w-4 text-gray-600 transition-transform ${showLanguageDropdown ? 'rotate-180' : ''}`} />
+                  <History className="h-5 w-5 text-purple-600" />
+                  <span className="text-sm font-medium text-purple-700">History</span>
                 </button>
 
-                {showLanguageDropdown && (
-                  <div className="absolute right-0 top-full mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-80 overflow-y-auto">
-                    {supportedLanguages.map((language) => (
-                      <button
-                        key={language.code}
-                        onClick={() => {
-                          setSelectedLanguage(language.code);
-                          setShowLanguageDropdown(false);
-                        }}
-                        className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 transition-colors ${
-                          selectedLanguage === language.code ? 'bg-blue-50 text-blue-600 font-medium' : 'text-gray-700'
-                        }`}
-                      >
-                        {language.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                <div className="relative" ref={dropdownRef}>
+                  <button
+                    onClick={() => setShowLanguageDropdown(!showLanguageDropdown)}
+                    className="flex items-center space-x-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                  >
+                    <Globe className="h-5 w-5 text-gray-600" />
+                    <span className="text-sm font-medium text-gray-700">
+                      {supportedLanguages.find(lang => lang.code === selectedLanguage)?.name || 'English'}
+                    </span>
+                    <ChevronDown className={`h-4 w-4 text-gray-600 transition-transform ${showLanguageDropdown ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {showLanguageDropdown && (
+                    <div className="absolute right-0 top-full mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-80 overflow-y-auto">
+                      {supportedLanguages.map((language) => (
+                        <button
+                          key={language.code}
+                          onClick={() => {
+                            setSelectedLanguage(language.code);
+                            setShowLanguageDropdown(false);
+                          }}
+                          className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 transition-colors ${
+                            selectedLanguage === language.code ? 'bg-blue-50 text-blue-600 font-medium' : 'text-gray-700'
+                          }`}
+                        >
+                          {language.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -511,8 +579,13 @@ export default function Home() {
                   Translation Complete!
                 </h3>
                 <p className="text-gray-600 mb-4">
-                  Your document has been successfully translated to English.
+                  Your document has been successfully translated to {supportedLanguages.find(lang => lang.code === selectedLanguage)?.name || 'English'}.
                 </p>
+                {saveSuccess && (
+                  <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm">
+                    ✓ Translation saved to database successfully!
+                  </div>
+                )}
                 <div className="flex flex-col sm:flex-row gap-3 justify-center">
                   <button
                     onClick={() => {
@@ -530,7 +603,14 @@ export default function Home() {
                     Edit Document
                   </button>
 
-
+                  <button
+                    onClick={handleSaveTranslation}
+                    disabled={isSaving}
+                    className="inline-flex items-center px-6 py-3 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition-all duration-200 transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Save className="h-5 w-5 mr-2" />
+                    {isSaving ? 'Saving...' : 'Save Translation'}
+                  </button>
                 </div>
               </div>
 
