@@ -98,12 +98,12 @@ async function processPDFWithGemini(file: File, targetLanguage: string, useHighF
 
   console.log(`PDF loaded: ${totalPages} pages total`);
 
-  // Determine chunk size based on file size
-  let chunkSize = 50; // Default chunk size
+  // Determine chunk size based on file size - smaller chunks for better quality
+  let chunkSize = 5; // Default chunk size (reduced for better translation quality)
   if (file.size > 50 * 1024 * 1024) { // Files larger than 50MB
-    chunkSize = 25; // Smaller chunks for large files
+    chunkSize = 3; // Even smaller chunks for large files
   } else if (totalPages > 200) { // Very long documents
-    chunkSize = 30; // Medium chunks for long documents
+    chunkSize = 5; // Keep at 5 for long documents
   }
 
   const totalChunks = Math.ceil(totalPages / chunkSize);
