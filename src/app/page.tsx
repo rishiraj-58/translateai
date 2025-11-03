@@ -24,6 +24,7 @@ export default function Home() {
   const [showHistory, setShowHistory] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [savedTranslationId, setSavedTranslationId] = useState<number | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown when clicking outside
@@ -167,6 +168,11 @@ export default function Home() {
     setSaveSuccess(false);
 
     try {
+      // Extract original text from segments
+      const originalText = translatedSegments.length > 0
+        ? translatedSegments.map(seg => seg.sourceText).join('\n\n')
+        : '';
+
       const response = await fetch('/api/translations/save', {
         method: 'POST',
         headers: {
@@ -174,7 +180,7 @@ export default function Home() {
         },
         body: JSON.stringify({
           originalFileName: uploadedFile.name,
-          originalText: '', // We could store original text if needed
+          originalText: originalText,
           translatedText: translatedContent,
           sourceLanguage: 'auto',
           targetLanguage: selectedLanguage,
@@ -193,8 +199,13 @@ export default function Home() {
       const data = await response.json();
       console.log('Translation saved:', data);
       
+      // Store the translation ID
+      if (data.translationId) {
+        setSavedTranslationId(data.translationId);
+      }
+      
       setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000); // Hide success message after 3 seconds
+      setTimeout(() => setSaveSuccess(false), 3000);
     } catch (error) {
       console.error('Error saving translation:', error);
       alert(
@@ -588,14 +599,24 @@ export default function Home() {
                 )}
                 <div className="flex flex-col sm:flex-row gap-3 justify-center">
                   <button
-                    onClick={() => {
-                      // Store content and segments in localStorage for the editor page
+                    onClick={async () => {
+                      // First, ensure the translation is saved to database
+                      if (!savedTranslationId) {
+                        await handleSaveTranslation();
+                      }
+                      
+                      // Store content in localStorage as backup
                       localStorage.setItem('translatedContent', translatedContent);
                       localStorage.setItem('translatedSegments', JSON.stringify(translatedSegments));
                       localStorage.setItem('originalFileName', uploadedFile?.name || '');
                       localStorage.setItem('selectedLanguage', selectedLanguage);
-                      // Navigate to editor page
-                      window.location.href = '/editor';
+                      
+                      // Navigate to editor page with unique ID if available
+                      if (savedTranslationId) {
+                        window.location.href = `/editor?id=${savedTranslationId}`;
+                      } else {
+                        window.location.href = '/editor';
+                      }
                     }}
                     className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-medium rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 transform hover:scale-105 shadow-lg"
                   >
@@ -609,7 +630,7 @@ export default function Home() {
                     className="inline-flex items-center px-6 py-3 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition-all duration-200 transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Save className="h-5 w-5 mr-2" />
-                    {isSaving ? 'Saving...' : 'Save Translation'}
+                    {isSaving ? 'Saving...' : (savedTranslationId ? 'Saved ✓' : 'Save Translation')}
                   </button>
                 </div>
               </div>

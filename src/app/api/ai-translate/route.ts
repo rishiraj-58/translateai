@@ -99,11 +99,11 @@ async function processPDFWithGemini(file: File, targetLanguage: string, useHighF
   console.log(`PDF loaded: ${totalPages} pages total`);
 
   // Determine chunk size based on file size - smaller chunks for better quality
-  let chunkSize = 5; // Default chunk size (reduced for better translation quality)
+  let chunkSize = 1; // Default chunk size (1 page for maximum quality)
   if (file.size > 50 * 1024 * 1024) { // Files larger than 50MB
-    chunkSize = 3; // Even smaller chunks for large files
+    chunkSize = 1; // Keep at 1 for large files
   } else if (totalPages > 200) { // Very long documents
-    chunkSize = 5; // Keep at 5 for long documents
+    chunkSize = 1; // Keep at 1 for long documents
   }
 
   const totalChunks = Math.ceil(totalPages / chunkSize);
@@ -157,32 +157,51 @@ Your task is to:
 1. Read and analyze the document structure, identifying headings, paragraphs, lists, and content organization.
 2. Extract ALL text from the document, including complex scripts and fonts.
 3. Translate the extracted text into ${targetLanguageName}, preserving the original structure and formatting.
-4. Return the translated content in MARKDOWN format that maintains the document's hierarchy:
-   - Use # for main headings (H1), ## for subheadings (H2), ### for smaller headings (H3), etc.
-   - Use **bold** for emphasis and important text
-   - Use *italic* for secondary emphasis
+4. Return the translated content in MARKDOWN format with clear visual hierarchy:
+   - Use # (single hash) ONLY for MAIN CHAPTER titles or major sections
+   - Use ## (double hash) for IMPORTANT subheadings and section titles
+   - Use ### (triple hash) for smaller subsections
+   - Use **bold** for emphasis, key terms, and important phrases
+   - Use *italic* for secondary emphasis and foreign terms
    - Use - or * for bullet lists
    - Use 1. 2. 3. for numbered lists
    - Use > for quotes or important passages
    - Maintain paragraph breaks with double line breaks
+   - Use appropriate heading levels based on content importance
 
-IMPORTANT: Return ONLY the translated ${targetLanguageName} text in markdown format. Do not include any commentary or explanations. Preserve all structural elements from the original document.`
+CRITICAL FORMATTING RULES:
+- Main chapter titles → # Chapter Title
+- Section headings → ## Section Heading  
+- Subsections → ### Subsection
+- Important terms and emphasis → **bold**
+- Regular paragraphs → no special formatting
+- Lists → proper markdown lists
+
+Return ONLY the translated ${targetLanguageName} text in markdown format. Do not include any commentary or explanations. Preserve all structural elements from the original document.`
 
       : `You are an expert document translator. The attached PDF document contains text from a book.
 
 Your task is to:
 1. Read the document and accurately extract all text while identifying its structure (headings, paragraphs, lists, etc.).
 2. Translate the extracted text into ${targetLanguageName}, preserving the original structure.
-3. Return the translated text in MARKDOWN format:
-   - Use # for main headings, ## for subheadings, ### for smaller headings
-   - Use **bold** for important text or headings that should stand out
-   - Use *italic* for emphasis
+3. Return the translated text in MARKDOWN format with clear visual hierarchy:
+   - Use # (single hash) for MAIN chapter titles
+   - Use ## (double hash) for major section headings
+   - Use ### (triple hash) for subsections
+   - Use **bold** for important text, key terms, and emphasis
+   - Use *italic* for secondary emphasis
    - Use - for bullet points
    - Use 1. 2. 3. for numbered lists
-   - Maintain paragraph breaks
-4. Do not include any commentary, apologies, or summaries.
+   - Maintain paragraph breaks with empty lines between paragraphs
 
-Focus on accuracy and maintaining the document's literary quality. Translate everything to ${targetLanguageName} with proper markdown formatting.`;
+IMPORTANT RULES:
+- Apply heading levels based on importance: # for chapters, ## for sections, ### for subsections
+- Use **bold** generously for important terms and phrases
+- Keep regular text without formatting
+- Maintain clear visual hierarchy
+- Do not include any commentary, apologies, or summaries
+
+Focus on accuracy and maintaining the document's literary quality. Translate everything to ${targetLanguageName} with proper markdown formatting and clear visual hierarchy.`;
 
     let attempt = 0;
     let success = false;

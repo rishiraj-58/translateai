@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useRouter } from 'next/navigation';
-import { marked } from 'marked';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Download,
   FileText,
@@ -15,31 +14,23 @@ import {
   ZoomIn,
   ZoomOut,
   Home,
-  ChevronLeft,
-  ChevronRight,
   Globe,
   ChevronDown,
   Languages,
   PanelLeftClose,
   PanelLeftOpen,
-  Eye,
-  Code,
   Undo,
   Redo,
-  AlignLeft,
-  AlignCenter,
-  AlignRight
+  Check
 } from 'lucide-react';
-
-// Configure marked
-marked.setOptions({
-  breaks: true,
-  gfm: true,
-});
 
 export default function EditorPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const translationId = searchParams.get('id');
+  
   const [content, setContent] = useState('');
+  const [originalContent, setOriginalContent] = useState('');
   const [translatedSegments, setTranslatedSegments] = useState<any[]>([]);
   const [originalFileName, setOriginalFileName] = useState('');
   const [selectedLanguage, setSelectedLanguage] = useState('en');
@@ -49,11 +40,11 @@ export default function EditorPage() {
   const [fontSize, setFontSize] = useState(14);
   const [fontFamily, setFontFamily] = useState('Times New Roman');
   const [zoom, setZoom] = useState(100);
-  const [history, setHistory] = useState<string[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const [showPreview, setShowPreview] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const editorRef = useRef<HTMLTextAreaElement>(null);
+  const contentEditableRef = useRef<HTMLDivElement>(null);
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const supportedLanguages = [
     { code: 'en', name: 'English' },
@@ -72,31 +63,57 @@ export default function EditorPage() {
 
   // Load content
   useEffect(() => {
-    const storedContent = localStorage.getItem('translatedContent');
-    const storedSegments = localStorage.getItem('translatedSegments');
-    const storedFileName = localStorage.getItem('originalFileName');
-    const storedLanguage = localStorage.getItem('selectedLanguage');
-
-    if (storedContent) {
-      setContent(storedContent);
-      setHistory([storedContent]);
-      setHistoryIndex(0);
-    }
-    if (storedSegments) {
-      try {
-        const parsedSegments = JSON.parse(storedSegments);
-        setTranslatedSegments(parsedSegments);
-      } catch (error) {
-        console.error('Failed to parse segments:', error);
+    const loadContent = async () => {
+      if (translationId) {
+        try {
+          const response = await fetch(`/api/translations/${translationId}`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.translation) {
+              setContent(data.translation.translated_text);
+              setOriginalContent(data.translation.original_text || '');
+              setOriginalFileName(data.translation.original_file_name);
+              setSelectedLanguage(data.translation.target_language);
+              setHasLoadedContent(true);
+              return;
+            }
+          }
+        } catch (error) {
+          console.error('Failed to load from database:', error);
+        }
       }
-    }
-    if (storedFileName) setOriginalFileName(storedFileName);
-    if (storedLanguage) setSelectedLanguage(storedLanguage);
 
-    setHasLoadedContent(true);
-  }, []);
+      const storedContent = localStorage.getItem('translatedContent');
+      const storedSegments = localStorage.getItem('translatedSegments');
+      const storedFileName = localStorage.getItem('originalFileName');
+      const storedLanguage = localStorage.getItem('selectedLanguage');
 
-  // Close dropdown
+      if (storedContent) {
+        setContent(storedContent);
+      }
+      
+      if (storedSegments) {
+        try {
+          const parsedSegments = JSON.parse(storedSegments);
+          setTranslatedSegments(parsedSegments);
+          const originalText = parsedSegments
+            .map((seg: any) => seg.sourceText)
+            .join('\n\n');
+          setOriginalContent(originalText);
+        } catch (error) {
+          console.error('Failed to parse segments:', error);
+        }
+      }
+      
+      if (storedFileName) setOriginalFileName(storedFileName);
+      if (storedLanguage) setSelectedLanguage(storedLanguage);
+
+      setHasLoadedContent(true);
+    };
+
+    loadContent();
+  }, [translationId]);
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -107,8 +124,39 @@ export default function EditorPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Auto-save to database
+  const autoSaveToDatabase = useCallback(async (newContent: string) => {
+    if (!translationId) return;
+
+    setIsSaving(true);
+    try {
+      const response = await fetch('/api/translations/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: translationId,
+          translatedText: newContent
+        })
+      });
+
+      if (response.ok) {
+        setLastSaved(new Date());
+      }
+    } catch (error) {
+      console.error('Auto-save failed:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [translationId]);
+
   const handleBackToMain = () => {
-    localStorage.setItem('translatedContent', content);
+    if (contentEditableRef.current) {
+      const htmlContent = contentEditableRef.current.innerHTML;
+      const textContent = contentEditableRef.current.innerText;
+      localStorage.setItem('translatedContent', textContent);
+    } else {
+      localStorage.setItem('translatedContent', content);
+    }
     if (translatedSegments.length > 0) {
       localStorage.setItem('translatedSegments', JSON.stringify(translatedSegments));
     }
@@ -117,65 +165,43 @@ export default function EditorPage() {
     router.push('/');
   };
 
-  const handleContentChange = (newContent: string) => {
+  const handleContentChange = () => {
+    if (!contentEditableRef.current) return;
+    
+    const newContent = contentEditableRef.current.innerText;
     setContent(newContent);
-    // Add to history
-    const newHistory = history.slice(0, historyIndex + 1);
-    newHistory.push(newContent);
-    setHistory(newHistory);
-    setHistoryIndex(newHistory.length - 1);
+    localStorage.setItem('translatedContent', newContent);
+
+    // Debounced auto-save
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    const timeout = setTimeout(() => {
+      autoSaveToDatabase(newContent);
+    }, 2000);
+    saveTimeoutRef.current = timeout;
+  };
+
+  const applyFormat = (format: 'bold' | 'italic' | 'underline') => {
+    document.execCommand(format, false);
+    if (contentEditableRef.current) {
+      contentEditableRef.current.focus();
+    }
+  };
+
+  const applyHeading = () => {
+    document.execCommand('formatBlock', false, '<h2>');
+    if (contentEditableRef.current) {
+      contentEditableRef.current.focus();
+    }
   };
 
   const handleUndo = () => {
-    if (historyIndex > 0) {
-      setHistoryIndex(historyIndex - 1);
-      setContent(history[historyIndex - 1]);
-    }
+    document.execCommand('undo', false);
   };
 
   const handleRedo = () => {
-    if (historyIndex < history.length - 1) {
-      setHistoryIndex(historyIndex + 1);
-      setContent(history[historyIndex + 1]);
-    }
-  };
-
-  const applyFormat = (format: 'bold' | 'italic' | 'heading' | 'underline') => {
-    if (!editorRef.current) return;
-
-    const start = editorRef.current.selectionStart;
-    const end = editorRef.current.selectionEnd;
-    const selectedText = content.substring(start, end);
-
-    if (!selectedText) {
-      alert('Please select text first');
-      return;
-    }
-
-    let formattedText = '';
-    switch (format) {
-      case 'bold':
-        formattedText = `**${selectedText}**`;
-        break;
-      case 'italic':
-        formattedText = `*${selectedText}*`;
-        break;
-      case 'underline':
-        formattedText = `<u>${selectedText}</u>`;
-        break;
-      case 'heading':
-        formattedText = `## ${selectedText}`;
-        break;
-    }
-
-    const newContent = content.substring(0, start) + formattedText + content.substring(end);
-    handleContentChange(newContent);
-
-    setTimeout(() => {
-      editorRef.current?.focus();
-      const newCursorPos = start + formattedText.length;
-      editorRef.current?.setSelectionRange(newCursorPos, newCursorPos);
-    }, 0);
+    document.execCommand('redo', false);
   };
 
   const handleDownload = useCallback(async (format: 'txt' | 'docx' | 'pdf') => {
@@ -184,8 +210,10 @@ export default function EditorPage() {
       const timestamp = new Date().toISOString().split('T')[0];
       const downloadFileName = `${fileName}_edited_${timestamp}`;
 
+      const textContent = contentEditableRef.current?.innerText || content;
+
       if (format === 'txt') {
-        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+        const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -199,8 +227,8 @@ export default function EditorPage() {
         const { createDocumentReconstructor, downloadBlob } = documentReconstruction;
 
         const translationResults = [{
-          originalText: 'Document content',
-          translatedText: content,
+          originalText: originalContent || 'Document content',
+          translatedText: textContent,
           sourceLanguage: 'auto',
           targetLanguage: selectedLanguage,
           confidence: 0.95
@@ -229,12 +257,34 @@ export default function EditorPage() {
       console.error('Download failed:', error);
       alert('Failed to download file');
     }
-  }, [content, originalFileName, selectedLanguage]);
+  }, [content, originalContent, originalFileName, selectedLanguage]);
+
+  // Convert markdown to HTML for initial display
+  const markdownToHtml = (markdown: string): string => {
+    return markdown
+      .split('\n\n')
+      .map(paragraph => {
+        if (paragraph.startsWith('# ')) {
+          return `<h1>${paragraph.slice(2)}</h1>`;
+        } else if (paragraph.startsWith('## ')) {
+          return `<h2>${paragraph.slice(3)}</h2>`;
+        } else if (paragraph.startsWith('### ')) {
+          return `<h3>${paragraph.slice(4)}</h3>`;
+        } else {
+          let html = paragraph
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.+?)\*/g, '<em>$1</em>')
+            .replace(/<u>(.+?)<\/u>/g, '<u>$1</u>');
+          return `<p>${html}</p>`;
+        }
+      })
+      .join('');
+  };
 
   const wordCount = content.trim().split(/\s+/).filter(word => word.length > 0).length;
   const charCount = content.length;
 
-  // Split content into A4-sized pages (approximately 500 words per page)
+  // Split content into A4 pages
   const WORDS_PER_PAGE = 500;
   const words = content.split(/\s+/);
   const pages: string[] = [];
@@ -246,7 +296,14 @@ export default function EditorPage() {
   
   if (pages.length === 0) pages.push('');
 
-  const hasSegments = translatedSegments && translatedSegments.length > 0;
+  // Split original content
+  const originalWords = originalContent.split(/\s+/);
+  const originalPages: string[] = [];
+  
+  for (let i = 0; i < originalWords.length; i += WORDS_PER_PAGE) {
+    const pageWords = originalWords.slice(i, i + WORDS_PER_PAGE);
+    originalPages.push(pageWords.join(' '));
+  }
 
   if (!hasLoadedContent) {
     return (
@@ -260,7 +317,7 @@ export default function EditorPage() {
     );
   }
 
-  if (!content && !hasSegments) {
+  if (!content) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center p-4">
         <div className="text-center max-w-md">
@@ -280,6 +337,44 @@ export default function EditorPage() {
 
   return (
     <div className="min-h-screen bg-gray-100">
+      {/* Custom CSS */}
+      <style jsx global>{`
+        .editable-content {
+          outline: none;
+        }
+        .editable-content h1 {
+          font-size: 2em;
+          font-weight: 700;
+          margin: 1.5em 0 0.5em 0;
+          line-height: 1.2;
+        }
+        .editable-content h2 {
+          font-size: 1.6em;
+          font-weight: 600;
+          margin: 1.2em 0 0.4em 0;
+          line-height: 1.3;
+        }
+        .editable-content h3 {
+          font-size: 1.3em;
+          font-weight: 600;
+          margin: 1em 0 0.3em 0;
+          line-height: 1.4;
+        }
+        .editable-content p {
+          margin-bottom: 1em;
+          line-height: 1.6;
+        }
+        .editable-content strong {
+          font-weight: 700;
+        }
+        .editable-content em {
+          font-style: italic;
+        }
+        .editable-content u {
+          text-decoration: underline;
+        }
+      `}</style>
+
       {/* Header */}
       <header className="bg-white border-b border-gray-300 sticky top-0 z-50 shadow-sm">
         <div className="px-4 py-3">
@@ -299,7 +394,6 @@ export default function EditorPage() {
               </span>
             </div>
 
-            {/* Language Selector */}
             <div className="relative" ref={dropdownRef}>
               <button
                 onClick={() => setShowLanguageDropdown(!showLanguageDropdown)}
@@ -342,16 +436,14 @@ export default function EditorPage() {
             {/* Undo/Redo */}
             <button
               onClick={handleUndo}
-              disabled={historyIndex <= 0}
-              className="p-2 hover:bg-gray-100 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+              className="p-2 hover:bg-gray-100 rounded"
               title="Undo"
             >
               <Undo className="h-4 w-4" />
             </button>
             <button
               onClick={handleRedo}
-              disabled={historyIndex >= history.length - 1}
-              className="p-2 hover:bg-gray-100 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+              className="p-2 hover:bg-gray-100 rounded"
               title="Redo"
             >
               <Redo className="h-4 w-4" />
@@ -378,7 +470,6 @@ export default function EditorPage() {
               <button
                 onClick={() => setFontSize(prev => Math.max(10, prev - 1))}
                 className="p-1.5 hover:bg-gray-100 rounded"
-                title="Decrease size"
               >
                 <ZoomOut className="h-4 w-4" />
               </button>
@@ -386,7 +477,6 @@ export default function EditorPage() {
               <button
                 onClick={() => setFontSize(prev => Math.min(24, prev + 1))}
                 className="p-1.5 hover:bg-gray-100 rounded"
-                title="Increase size"
               >
                 <ZoomIn className="h-4 w-4" />
               </button>
@@ -398,28 +488,28 @@ export default function EditorPage() {
             <button
               onClick={() => applyFormat('bold')}
               className="p-2 hover:bg-gray-100 rounded"
-              title="Bold (select text first)"
+              title="Bold"
             >
               <Bold className="h-4 w-4" />
             </button>
             <button
               onClick={() => applyFormat('italic')}
               className="p-2 hover:bg-gray-100 rounded"
-              title="Italic (select text first)"
+              title="Italic"
             >
               <Italic className="h-4 w-4" />
             </button>
             <button
               onClick={() => applyFormat('underline')}
               className="p-2 hover:bg-gray-100 rounded"
-              title="Underline (select text first)"
+              title="Underline"
             >
               <Underline className="h-4 w-4" />
             </button>
             <button
-              onClick={() => applyFormat('heading')}
+              onClick={applyHeading}
               className="p-2 hover:bg-gray-100 rounded"
-              title="Heading (select text first)"
+              title="Heading"
             >
               <Type className="h-4 w-4" />
             </button>
@@ -427,21 +517,15 @@ export default function EditorPage() {
             <div className="h-6 w-px bg-gray-300"></div>
 
             {/* View Options */}
-            <button
-              onClick={() => setShowOriginal(!showOriginal)}
-              className="flex items-center gap-1 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded text-sm font-medium"
-            >
-              {showOriginal ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
-              {showOriginal ? 'Hide' : 'Show'} Original
-            </button>
-
-            <button
-              onClick={() => setShowPreview(!showPreview)}
-              className="flex items-center gap-1 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded text-sm font-medium"
-            >
-              {showPreview ? <Code className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              {showPreview ? 'Edit' : 'Preview'}
-            </button>
+            {originalContent && (
+              <button
+                onClick={() => setShowOriginal(!showOriginal)}
+                className="flex items-center gap-1 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded text-sm font-medium"
+              >
+                {showOriginal ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
+                {showOriginal ? 'Hide' : 'Show'} Original
+              </button>
+            )}
 
             <div className="h-6 w-px bg-gray-300"></div>
 
@@ -499,8 +583,24 @@ export default function EditorPage() {
             <span><strong>{pages.length}</strong> pages (A4)</span>
           </div>
           <div className="flex items-center gap-2">
-            <Save className="h-4 w-4 text-green-600" />
-            <span className="text-green-600 font-medium">Auto-saved</span>
+            {isSaving ? (
+              <>
+                <Save className="h-4 w-4 text-blue-600 animate-pulse" />
+                <span className="text-blue-600 font-medium">Saving...</span>
+              </>
+            ) : lastSaved ? (
+              <>
+                <Check className="h-4 w-4 text-green-600" />
+                <span className="text-green-600 font-medium">
+                  Saved {lastSaved.toLocaleTimeString()}
+                </span>
+              </>
+            ) : (
+              <>
+                <Save className="h-4 w-4 text-gray-400" />
+                <span className="text-gray-400">Ready</span>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -508,83 +608,68 @@ export default function EditorPage() {
       {/* Main Editor */}
       <main className="p-8 overflow-auto" style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'top center' }}>
         <div className="max-w-7xl mx-auto">
-          <div className={`flex gap-6 ${!showOriginal ? 'justify-center' : ''}`}>
+          <div className={`flex gap-6 ${!showOriginal || !originalContent ? 'justify-center' : ''}`}>
             {/* Original Text Panel */}
-            {showOriginal && hasSegments && (
+            {showOriginal && originalContent && (
               <div className="w-1/2">
-                <div className="bg-white border border-gray-300 rounded-lg shadow-sm p-6 mb-4">
-                  <div className="flex items-center gap-2 mb-4 pb-2 border-b border-gray-200">
-                    <Languages className="h-5 w-5 text-gray-600" />
-                    <h2 className="font-semibold text-gray-800">Original Text</h2>
-                  </div>
-                  <div 
-                    className="prose max-w-none text-gray-800 leading-relaxed"
-                    style={{ fontSize: `${fontSize}px`, fontFamily }}
+                {originalPages.map((pageContent, pageIndex) => (
+                  <div
+                    key={`original-${pageIndex}`}
+                    className="bg-gray-50 border border-gray-300 rounded-lg shadow-sm p-12 mb-8"
+                    style={{
+                      minHeight: '297mm',
+                      width: '210mm',
+                      maxWidth: '210mm'
+                    }}
                   >
-                    {translatedSegments.map((seg, idx) => (
-                      <div key={seg.id} className="mb-6 pb-6 border-b border-gray-200 last:border-0">
-                        <div className="text-xs text-gray-500 mb-2 font-semibold">Page {idx + 1}</div>
-                        <div className="whitespace-pre-wrap">{seg.sourceText}</div>
-                      </div>
-                    ))}
+                    <div className="flex items-center gap-2 mb-4 pb-2 border-b border-gray-300">
+                      <Languages className="h-5 w-5 text-gray-600" />
+                      <h3 className="font-semibold text-gray-800 text-sm uppercase">Original - Page {pageIndex + 1}</h3>
+                    </div>
+                    <div 
+                      className="prose prose-sm max-w-none text-gray-800 leading-relaxed whitespace-pre-wrap"
+                      style={{ fontSize: `${fontSize}px`, fontFamily }}
+                    >
+                      {pageContent}
+                    </div>
                   </div>
-                </div>
+                ))}
               </div>
             )}
 
-            {/* Translated Text Editor */}
-            <div className={`${showOriginal && hasSegments ? 'w-1/2' : 'max-w-4xl mx-auto'}`}>
-              {pages.map((pageContent, pageIndex) => (
-                <div
-                  key={pageIndex}
-                  className="bg-white border border-gray-300 rounded-lg shadow-lg p-12 mb-8"
-                  style={{
-                    minHeight: '297mm', // A4 height
-                    width: '210mm', // A4 width
-                    maxWidth: '210mm'
-                  }}
-                >
-                  {/* Page Number */}
-                  <div className="text-center text-gray-400 text-xs mb-6 pb-2 border-b border-gray-200">
-                    Page {pageIndex + 1} of {pages.length}
-                  </div>
-
-                  {/* Content */}
-                  {showPreview ? (
-                    /* Preview Mode */
-                    <div
-                      className="prose prose-sm lg:prose-base max-w-none"
-                      style={{ fontSize: `${fontSize}px`, fontFamily }}
-                      dangerouslySetInnerHTML={{ __html: marked.parse(pageContent) as string }}
-                    />
-                  ) : (
-                    /* Edit Mode */
-                    <textarea
-                      ref={pageIndex === 0 ? editorRef : undefined}
-                      value={pageContent}
-                      onChange={(e) => {
-                        const newPages = [...pages];
-                        newPages[pageIndex] = e.target.value;
-                        handleContentChange(newPages.join('\n\n'));
-                      }}
-                      className="w-full min-h-[240mm] resize-none focus:outline-none bg-transparent leading-relaxed"
-                      style={{
-                        fontSize: `${fontSize}px`,
-                        fontFamily,
-                        lineHeight: 1.6
-                      }}
-                      placeholder={pageIndex === 0 ? "Start typing or paste your translated text..." : ""}
-                    />
-                  )}
-
-                  {/* Page Footer */}
-                  {pageIndex === pages.length - 1 && (
-                    <div className="text-center text-gray-400 text-xs mt-6 pt-2 border-t border-gray-200">
-                      End of Document
-                    </div>
-                  )}
+            {/* Editable Translated Text */}
+            <div className={`${showOriginal && originalContent ? 'w-1/2' : 'max-w-4xl mx-auto'}`}>
+              <div
+                className="bg-white border border-gray-300 rounded-lg shadow-lg p-12"
+                style={{
+                  minHeight: '297mm',
+                  width: '210mm',
+                  maxWidth: '210mm'
+                }}
+              >
+                <div className="text-center text-gray-400 text-xs mb-6 pb-2 border-b border-gray-200 flex items-center justify-between">
+                  <span>Translated Document</span>
+                  <span className="flex items-center gap-1">
+                    <FileText className="h-3 w-3" />
+                    Editable
+                  </span>
                 </div>
-              ))}
+
+                {/* ContentEditableDiv */}
+                <div
+                  ref={contentEditableRef}
+                  contentEditable
+                  suppressContentEditableWarning
+                  onInput={handleContentChange}
+                  className="editable-content min-h-[240mm] focus:outline-none"
+                  style={{
+                    fontSize: `${fontSize}px`,
+                    fontFamily,
+                    lineHeight: 1.6
+                  }}
+                  dangerouslySetInnerHTML={{ __html: markdownToHtml(content) }}
+                />
+              </div>
             </div>
           </div>
         </div>
